@@ -1,0 +1,139 @@
+MySQL
+/*
+Connect Terminal
+    mysql -u USERNAME -pPASSWORD -h HOSTNAMEORIP DATABASENAME 
+    
+    CREATE USER 'username'@'host' IDENTIFIED BY 'password'; 
+
+    GRANT ALL PRIVILEGES ON *.* TO 'username'@'localhost'; 
+
+*/
+
+-Qual storage engine utilizada? Innodb é o DEFAULT
+-System views
+	-performance_schema
+	
+	explain analyze
+	analyze table = update STATISTICS
+	
+-- IO_Selects
+	SELECT OBJECT_TYPE, OBJECT_SCHEMA,
+              OBJECT_NAME, INDEX_NAME,
+              COUNT_STAR
+         FROM performance_schema.table_io_waits_summary_by_index_usage
+        WHERE OBJECT_SCHEMA = 'world'
+              AND OBJECT_NAME = 'city'\G
+			  
+-- Buffer pool SIZE
+	# Calculate the Buffer Pool Hit Rate
+	SELECT Variable_name, Variable_value
+			 FROM sys.metrics
+			WHERE Variable_name IN
+					('Innodb_pages_read',
+					 'Innodb_buffer_pool_read_requests')\G
+
+	SELECT 100 - (100 * %Innodb_pages_read%/%Innodb_buffer_pool_read_requests%) AS HitRate;
+
+	# Verify Buffer Pool Instances
+	SHOW GLOBAL variables like 'innodb_buffer_pool_instances';			  
+	
+-- Query optimization
+	SELECT   *
+	FROM     performance_schema.events_statements_summary_by_digest
+	ORDER BY sum_timer_wait DESC limit 10\G
+
+	SELECT   *
+	FROM     sys.statements_with_full_table_scans
+	ORDER BY no_index_used_count DESC\G
+	
+-- Error Sumary
+	SELECT *
+	FROM   performance_schema.events_errors_summary_by_account_by_error
+	WHERE  error_name = 'ER_LOCK_DEADLOCK' \G
+	
+-- Explain analyze
+	EXPLAIN SELECT * FROM city WHERE name = 'London' \G
+	EXPLAIN ANALYZE SELECT * FROM city WHERE name = 'London' \G
+	EXPLAIN FORMAT=JSON SELECT * FROM city WHERE name = 'London' \G
+	
+-- Performance Schema
+	USE performance_schema;
+	SHOW tables; 
+
+	SELECT *
+	FROM   performance_schema.events_statements_summary_by_digest;
+
+	SELECT *
+	FROM   performance_schema.events_statements_summary_by_digest\G 
+
+	SELECT   *
+	FROM     performance_schema.events_statements_summary_by_digest
+	ORDER BY sum_timer_wait DESC limit 10\G
+	
+-- Redo Logs Config
+	# Redo Logs related configurations
+	SHOW GLOBAL variables like 'innodb_log_buffer_size';
+	SHOW GLOBAL variables like 'innodb_log_file_size';
+	SHOW GLOBAL variables like 'innodb_log_files_in_group';	
+	
+-- Top Queries
+	SELECT (100 * SUM_TIMER_WAIT / sum(SUM_TIMER_WAIT)
+				OVER ()) percent,
+				SUM_TIMER_WAIT AS total,
+				COUNT_STAR AS calls,
+				AVG_TIMER_WAIT AS mean,
+				substring(DIGEST_TEXT, 1, 75)
+	  FROM  performance_schema.events_statements_summary_by_digest
+				ORDER BY SUM_TIMER_WAIT DESC
+				LIMIT 10;
+
+	SELECT *
+	FROM   sys.statement_analysis LIMIT 10\G
+
+-- List running Queries
+	SHOW FULL PROCESSLIST\G;
+	
+	-- OR
+	
+	select id,
+    user,
+    host,
+    db,
+    command,
+    time,
+    state,
+    info
+	from information_schema.processlist;
+
+
+-- Select blocking Queries
+	SELECT
+	  r.trx_id waiting_trx_id,
+	  r.trx_mysql_thread_id waiting_thread,
+	  r.trx_query waiting_query,
+	  b.trx_id blocking_trx_id,
+	  b.trx_mysql_thread_id blocking_thread,
+	  b.trx_query blocking_query
+	FROM       performance_schema.data_lock_waits w
+	INNER JOIN information_schema.innodb_trx b
+	  ON b.trx_id = w.blocking_engine_transaction_id
+	INNER JOIN information_schema.innodb_trx r
+	  ON r.trx_id = w.requesting_engine_transaction_id;
+	  
+-- Select long running Queries
+	SELECT *
+		 , concat('KILL ', processlist_id, ';')                 AS kill_command
+		 , concat('CALL mysql.rds_kill(', processlist_id, ');') AS rds_kill_command
+	FROM performance_schema.threads
+	WHERE type = 'FOREGROUND'
+	  AND processlist_command != 'Sleep'
+	  and processlist_command != 'Daemon'
+	  AND processlist_id != connection_id()
+	ORDER BY processlist_time DESC;	  
+	  
+-- RDS KILL
+	-- Kill the connection for 1234
+	CALL mysql.rds_kill(1234);
+
+	-- Kill only the query for 1234
+	CALL mysql.rds_kill_query(1234);
